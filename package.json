@@ -1,0 +1,73 @@
+{
+  "name": "@influto/react-native-sdk",
+  "version": "1.5.0",
+  "description": "InfluTo SDK for React Native - Track influencer referrals and conversions",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "react-native": "lib/index.js",
+  "exports": {
+    ".": {
+      "import": "./lib/index.js",
+      "require": "./lib/index.js",
+      "types": "./lib/index.d.ts"
+    },
+    "./ui": {
+      "import": "./lib/ui.js",
+      "require": "./lib/ui.js",
+      "types": "./lib/ui.d.ts"
+    }
+  },
+  "files": [
+    "lib",
+    "ui.js",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "CONTRACT.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run build",
+    "test": "jest"
+  },
+  "keywords": [
+    "influto",
+    "influencer",
+    "affiliate",
+    "attribution",
+    "react-native",
+    "ios",
+    "android",
+    "revenuecat",
+    "tracking",
+    "analytics",
+    "referral"
+  ],
+  "author": "InfluTo <support@influ.to>",
+  "license": "MIT",
+  "peerDependencies": {
+    "react": ">=16.8.0",
+    "react-native": ">=0.60.0"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "^2.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-native": "^0.72.0",
+    "typescript": "^5.3.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/influto/influto-react-native.git"
+  },
+  "bugs": {
+    "url": "https://influ.to/support"
+  },
+  "homepage": "https://influ.to",
+  "publishConfig": {
+    "access": "public"
+  }
+}

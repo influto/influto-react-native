@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Type-check + build gate for the React Native SDK (tsc -> lib/). The example app
+# (example/App.tsx) is a reference that runs in an Expo development build (IAP can't
+# run in Expo Go), so it's not CI-compiled here.
+jobs:
+  build:
+    name: Type-check + build (tsc)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # --legacy-peer-deps: react-native's peer @types/react conflicts with the SDK's
+      # devDep; this is only a type-check (tsconfig has skipLibCheck), so it's safe.
+      - run: npm install --legacy-peer-deps
+      - run: npm run build

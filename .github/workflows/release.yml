@@ -1,0 +1,33 @@
+name: Release (npm)
+
+# Publishes @influto/react-native-sdk to npm via OIDC trusted publishing — no stored
+# NODE_AUTH_TOKEN. Configure this repo as a Trusted Publisher on the npm package
+# (npmjs.com -> package -> Settings -> Trusted Publisher, workflow filename: release.yml).
+# Bump package.json's version first, then publish a GitHub Release for the matching tag.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # required for npm OIDC trusted publishing + provenance
+
+jobs:
+  publish:
+    name: Build + publish to npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      # Trusted publishing needs npm >= 11.5.1; Node 20 ships an older npm.
+      - name: Upgrade npm (OIDC trusted publishing support)
+        run: npm install -g npm@latest
+      - run: npm install --legacy-peer-deps
+      - run: npm run build
+      - name: Publish (OIDC trusted publishing + provenance)
+        run: npm publish --provenance --access public
