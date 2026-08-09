@@ -5,6 +5,29 @@ All notable changes to `@influto/react-native-sdk` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-08-09
+
+### Fixed
+- **`checkAttribution()` no longer re-fires `/sdk/track-install` on every cold
+  start for organic users.** The organic (non-attributed) result is now
+  persisted like the attributed one, so the install ping happens once per
+  install. A failed network request still retries on the next launch.
+
+### Added
+- Persisted per-install UUID (`@influto/install_id`), sent as `device_id` so
+  the backend counts unique devices instead of launches. No permissions, no
+  fingerprinting; resets on reinstall by design.
+- Deterministic `eventId` for once-only monetization events
+  (`trial_started`, `subscription_purchased`, `subscription_renewed`) derived
+  from (event type, user, properties) — re-fires across app restarts now
+  collapse into a single server-side row even without a caller-supplied id.
+
+### Changed
+- `/sdk/track-install` wire body now uses the contract's snake_case field
+  names (`device_id`, `os_version`, `screen_resolution`, `device_brand`,
+  `device_model`). Previous camelCase bodies were silently dropped by the
+  backend (accepted since backend 2026-08-09 via aliases).
+
 ## [1.5.0] - 2026-06-15
 
 ### Added

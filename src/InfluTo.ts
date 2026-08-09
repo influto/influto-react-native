@@ -40,7 +40,7 @@ import type {
 import { AutoPurchaseCapture } from './autoCapture';
 
 /** SDK version reported on /sdk/init — keep in sync with package.json. */
-const SDK_VERSION = '1.5.0';
+const SDK_VERSION = '1.6.0';
 
 const STORAGE_PREFIX = '@influto/';
 const STORAGE_KEYS = {
@@ -49,6 +49,9 @@ const STORAGE_KEYS = {
   INFLUTO_CODE: `${STORAGE_PREFIX}influto_code`,
   SDK_INITIALIZED: `${STORAGE_PREFIX}initialized`,
   ACCESS: `${STORAGE_PREFIX}access`,
+  // Persisted once per install; sent as device_id so the backend can count
+  // devices instead of launches. Resets on reinstall = install semantics.
+  INSTALL_ID: `${STORAGE_PREFIX}install_id`,
 };
 
 /** checkAccess() positive-result cache TTL (ms). A negative result is never cached. */
@@ -67,6 +70,31 @@ function generateUuidV4(): string {
     return v.toString(16);
   });
 }
+
+/**
+ * FNV-1a 32-bit hex — tiny stable hash for deterministic event ids.
+ * Not cryptographic; only needs to be stable for the same input.
+ */
+function fnv1aHex(input: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
+}
+
+/**
+ * Event types that must land AT MOST once per (user, properties) — mirrors
+ * the backend's once-only dedup set. For these we derive a DETERMINISTIC
+ * event_id so re-fires across cold starts (host apps with in-memory
+ * "already reported" state) collapse into one row server-side.
+ */
+const ONCE_ONLY_EVENT_TYPES = new Set([
+  'subscription_purchased',
+  'trial_started',
+  'subscription_renewed',
+]);
 
 class InfluToSDK {
   private config: InfluToConfig | null = null;
@@ -151,12 +179,24 @@ class InfluToSDK {
         return JSON.parse(storedAttribution);
       }
 
-      // Track install and check attribution
+      // Track install and check attribution.
+      // Wire body is snake_case per CONTRACT.md; device_id is the persisted
+      // per-install UUID so the backend counts devices, not launches.
       const deviceInfo = await this.getDeviceInfo();
+      const installId = await this.getInstallId();
 
       const response = await this.apiRequest('/sdk/track-install', {
         method: 'POST',
-        body: JSON.stringify(deviceInfo)
+        body: JSON.stringify({
+          platform: deviceInfo.platform,
+          device_id: installId,
+          device_brand: deviceInfo.deviceBrand,
+          device_model: deviceInfo.deviceModel,
+          os_version: deviceInfo.osVersion,
+          screen_resolution: deviceInfo.screenResolution,
+          timezone: deviceInfo.timezone,
+          language: deviceInfo.language,
+        })
       });
 
       if (response.attributed && response.referral_code) {
@@ -203,10 +243,20 @@ class InfluToSDK {
           console.log('[InfluTo] No attribution found (organic install)');
         }
 
-        return {
+        const organic: AttributionResult = {
           attributed: false,
           message: response.message || 'No attribution found'
         };
+
+        // Persist the ORGANIC result too. Before 1.6.0 only attributed
+        // results were cached, so every cold start of an organic user
+        // re-POSTed /sdk/track-install for the app's whole lifetime —
+        // the launch-counter bug. Attribution is decided once per install;
+        // a network failure is the only reason to ask again (the catch
+        // below deliberately persists nothing so the next launch retries).
+        await AsyncStorage.setItem(STORAGE_KEYS.ATTRIBUTION, JSON.stringify(organic));
+
+        return organic;
       }
     } catch (error) {
       if (this.config?.debug) {
@@ -216,6 +266,25 @@ class InfluToSDK {
         attributed: false,
         message: 'Error checking attribution'
       };
+    }
+  }
+
+  /**
+   * Per-install UUID, generated once and persisted. Sent as device_id on
+   * /sdk/track-install so the backend can dedupe launches into installs.
+   * No permissions, no fingerprinting — resets on reinstall by design.
+   */
+  private async getInstallId(): Promise<string> {
+    try {
+      const existing = await AsyncStorage.getItem(STORAGE_KEYS.INSTALL_ID);
+      if (existing) return existing;
+      const fresh = generateUuidV4();
+      await AsyncStorage.setItem(STORAGE_KEYS.INSTALL_ID, fresh);
+      return fresh;
+    } catch {
+      // Storage unavailable — fall back to a per-session id; the backend's
+      // fingerprint fallback still bounds the damage.
+      return generateUuidV4();
     }
   }
 
@@ -271,13 +340,28 @@ class InfluToSDK {
       return;
     }
 
-    // Auto-generate idempotency key if caller didn't supply one. Without
-    // this, a host app firing trackEvent twice (e.g. inside a customerInfo
-    // listener that also runs after Purchases.purchasePackage resolves)
-    // produces 2 rows in sdk_events — the bug we're defending against.
+    // Idempotency key when the caller didn't supply one.
+    // - Once-only monetization events get a DETERMINISTIC id derived from
+    //   (event_type, app_user_id, properties): re-fires across cold starts
+    //   (host apps whose "already reported" state lives in memory) map to
+    //   the same id and collapse server-side. A random uuid only protected
+    //   against double-fires within one session.
+    // - Repeatable events keep a random uuid (each call is a new event).
+    let eventId = options.eventId;
+    if (!eventId) {
+      if (ONCE_ONLY_EVENT_TYPES.has(options.eventType)) {
+        const propsCanonical = JSON.stringify(
+          Object.entries(options.properties ?? {}).sort(([a], [b]) => a.localeCompare(b))
+        );
+        eventId = `det:${options.eventType}:${options.appUserId}:${fnv1aHex(propsCanonical)}`;
+      } else {
+        eventId = generateUuidV4();
+      }
+    }
+
     const payload = {
       ...options,
-      eventId: options.eventId ?? generateUuidV4(),
+      eventId,
     };
 
     try {
