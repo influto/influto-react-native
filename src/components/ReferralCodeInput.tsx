@@ -211,7 +211,7 @@ export const ReferralCodeInput: React.FC<ReferralCodeInputProps> = ({
   // Default labels
   const labelScheme = {
     title: labels.title || 'Have a promo code?',
-    subtitle: labels.subtitle || 'Enter your referral code to unlock special offers',
+    subtitle: labels.subtitle || 'Add the code you received from a creator or friend',
     placeholder: labels.placeholder || 'Enter code (e.g., FITGURU30)',
     validateButton: labels.validateButton || 'Apply Code',
     skipButton: labels.skipButton || 'Skip',

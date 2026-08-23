@@ -468,7 +468,7 @@ function OnboardingFlow() {
             onSkip={() => setCurrentStep(4)}
             labels={{
               title: 'Have a referral code?',
-              subtitle: 'Enter it to unlock a special trial offer'
+              subtitle: 'Add it here to apply your introductory offer'
             }}
           />
         </View>

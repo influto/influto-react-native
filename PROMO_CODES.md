@@ -356,12 +356,12 @@ import { ReferralCodeInput } from '@influto/react-native-sdk/ui';
 
   labels={{
     title: 'Have a promo code?',
-    subtitle: 'Unlock exclusive offers with an influencer code',
+    subtitle: 'Add the code your creator shared with you',
     placeholder: 'Enter code (e.g., FITGURU30)',
     validateButton: 'Apply & Continue',
     skipButton: 'No thanks',
     validatingMessage: 'Checking code...',
-    validMessage: 'Code applied! Special offer unlocked.',
+    validMessage: 'Code applied! Your offer is ready at checkout.',
     invalidMessage: 'Code not found. Double-check and try again.',
     errorMessage: 'Unable to validate. Check your internet connection.',
     prefilledMessage: '✓ Code detected from your referral link'
@@ -677,10 +677,10 @@ import { ReferralCodeInput } from '@influto/react-native-sdk/ui';
   }}
 
   labels={{
-    title: 'Unlock Your Special Offer',
+    title: 'Add Your Code',
     subtitle: 'Enter the code shared by your favorite influencer',
     placeholder: 'INFLUENCER CODE',
-    validateButton: 'Unlock Offer',
+    validateButton: 'Apply Code',
     skipButton: 'Continue Without Code',
     validMessage: '🎉 Special offer activated!',
     invalidMessage: 'Hmm, that code isn\'t valid. Double-check it?'
