@@ -5,6 +5,27 @@ All notable changes to `@influto/react-native-sdk` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] - 2026-10-09
+
+### Fixed
+- **`setReferralCode()` / `applyCode()` fall back to the user stored by
+  `identifyUser()`** when `appUserId` isn't passed (as the web SDK already
+  does). Without it the backend rejected free-access codes with
+  `MISSING_USER_ID`.
+- **A code is stored only after the server accepts it.** `setReferralCode()`
+  used to persist the code locally and write the RevenueCat attributes
+  (`influto_code`, `influto_referral`) before the backend answered, so a
+  rejected code stayed stored and tagged. Both now happen only on
+  `success: true`, using the canonical code the server returns. Still
+  fail-soft (no throw).
+- **Auto-captured Android one-time purchases now carry a price.** Play
+  purchases from `expo-iap` / `react-native-iap` have no price, so the
+  backend recorded the sale at $0. For products listed in
+  `oneTimeProductIds`, auto-capture now looks the product's price + currency
+  up through the same IAP library (`fetchProducts` / `requestProducts` /
+  `getProducts`, whichever the installed version has) before reporting; if
+  the lookup fails it reports without a price as before.
+
 ## [1.6.0] - 2026-08-09
 
 ### Fixed

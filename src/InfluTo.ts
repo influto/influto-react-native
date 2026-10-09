@@ -40,7 +40,7 @@ import type {
 import { AutoPurchaseCapture } from './autoCapture';
 
 /** SDK version reported on /sdk/init — keep in sync with package.json. */
-const SDK_VERSION = '1.6.0';
+const SDK_VERSION = '1.6.1';
 
 const STORAGE_PREFIX = '@influto/';
 const STORAGE_KEYS = {
@@ -482,12 +482,14 @@ class InfluToSDK {
    *
    * Use this when user enters a promo code manually (not from link click).
    * This will:
-   * 1. Store the code locally
-   * 2. Set it in RevenueCat attributes automatically
-   * 3. Record the attribution with backend
+   * 1. Record the attribution with the backend
+   * 2. Only once the backend accepts it (`success: true`): store the code locally
+   *    and set it in RevenueCat attributes automatically — a rejected code is
+   *    never stored or tagged
    *
    * @param code - The referral code to set
-   * @param appUserId - Optional user ID (if available)
+   * @param appUserId - Optional user ID. Defaults to the one stored by
+   *   `identifyUser()`; free-access codes need one (`MISSING_USER_ID` otherwise)
    * @returns Result with success status
    *
    * @example
@@ -512,50 +514,67 @@ class InfluToSDK {
     const normalizedCode = code.trim().toUpperCase();
 
     try {
-      // Store locally
-      await AsyncStorage.setItem(STORAGE_KEYS.INFLUTO_CODE, normalizedCode);
+      // Fall back to the user stored by identifyUser(): free-access codes need a
+      // user id (the backend rejects them with MISSING_USER_ID without one).
+      const uid =
+        appUserId || (await AsyncStorage.getItem(STORAGE_KEYS.APP_USER_ID)) || undefined;
 
-      // Store attribution record
-      const attribution: AttributionResult = {
-        attributed: true,
-        referralCode: normalizedCode,
-        attributionMethod: 'manual_entry',
-        clickedAt: new Date().toISOString(),
-        message: 'Manually entered code'
-      };
-      await AsyncStorage.setItem(STORAGE_KEYS.ATTRIBUTION, JSON.stringify(attribution));
-
-      // Set in RevenueCat automatically
-      // Sets both influto_code and influto_referral flag for RevenueCat Targeting
-      try {
-        const Purchases = require('react-native-purchases').default;
-        if (Purchases && Purchases.setAttributes) {
-          await Purchases.setAttributes({
-            influto_code: normalizedCode,
-            influto_referral: 'true'  // Flag for RevenueCat Targeting rules
-          });
-
-          if (this.config?.debug) {
-            console.log('[InfluTo] ✅ RevenueCat attributes set: influto_code + influto_referral=true');
-          }
-        }
-      } catch (e) {
-        if (this.config?.debug) {
-          console.warn('[InfluTo] RevenueCat not available - set manually');
-        }
-      }
-
-      // Record with backend
+      // Record with backend FIRST — the code is stored / tagged only once accepted.
       const response = await this.apiRequest('/sdk/set-referral-code', {
         method: 'POST',
         body: JSON.stringify({
           code: normalizedCode,
-          app_user_id: appUserId
+          app_user_id: uid
         })
       });
 
+      if (response?.success === true) {
+        // The backend answers with the matched canonical code; prefer it over the input.
+        const acceptedCode =
+          typeof response.code === 'string' && response.code ? response.code : normalizedCode;
+
+        // Store locally (a local storage failure must not mask the server's answer)
+        try {
+          await AsyncStorage.setItem(STORAGE_KEYS.INFLUTO_CODE, acceptedCode);
+
+          // Store attribution record
+          const attribution: AttributionResult = {
+            attributed: true,
+            referralCode: acceptedCode,
+            attributionMethod: 'manual_entry',
+            clickedAt: new Date().toISOString(),
+            message: 'Manually entered code'
+          };
+          await AsyncStorage.setItem(STORAGE_KEYS.ATTRIBUTION, JSON.stringify(attribution));
+        } catch (e) {
+          if (this.config?.debug) {
+            console.warn('[InfluTo] Failed to persist referral code locally:', e);
+          }
+        }
+
+        // Set in RevenueCat automatically
+        // Sets both influto_code and influto_referral flag for RevenueCat Targeting
+        try {
+          const Purchases = require('react-native-purchases').default;
+          if (Purchases && Purchases.setAttributes) {
+            await Purchases.setAttributes({
+              influto_code: acceptedCode,
+              influto_referral: 'true'  // Flag for RevenueCat Targeting rules
+            });
+
+            if (this.config?.debug) {
+              console.log('[InfluTo] ✅ RevenueCat attributes set: influto_code + influto_referral=true');
+            }
+          }
+        } catch (e) {
+          if (this.config?.debug) {
+            console.warn('[InfluTo] RevenueCat not available - set manually');
+          }
+        }
+      }
+
       return {
-        success: response.success === true,
+        success: response?.success === true,
         code: response.code,
         message: response.message,
         campaign: response.campaign,

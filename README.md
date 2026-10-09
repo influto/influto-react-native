@@ -155,7 +155,7 @@ Initialize the SDK. Call once when app starts.
 - `config.debug` (optional): Enable debug logging (defaults to `false`)
 - `config.appVersion` (optional): Your app's version string, reported on init for telemetry (defaults to `"unknown"`)
 - `config.autoCapture` (optional): Auto-capture and report store purchases (store-direct apps only). Defaults to `true`; set `false` to report purchases yourself. Has no effect on RevenueCat apps.
-- `config.oneTimeProductIds` (optional): Your one-time / consumable Android product ids. Needed so auto-capture can route a Play one-time purchase to one-time (vs subscription) validation. iOS needs nothing; omit if you only sell subscriptions.
+- `config.oneTimeProductIds` (optional): Your one-time / consumable Android product ids. Needed so auto-capture can route a Play one-time purchase to one-time (vs subscription) validation. A Play purchase carries no price, so auto-capture looks the product's price + currency up through the same IAP library before reporting (if that lookup fails it reports without a price). iOS needs nothing; omit if you only sell subscriptions.
 
 **Returns:** `Promise<void>`
 
@@ -216,11 +216,11 @@ Validate a referral/promo code without applying it. Use when a user manually ent
 
 ### `InfluTo.setReferralCode(code, appUserId?)`
 
-Manually apply a referral code: stores it locally, sets RevenueCat attributes, and records the attribution with the backend.
+Manually apply a referral code: records the attribution with the backend and — only once the backend accepts it (`success: true`) — stores it locally and sets RevenueCat attributes. A rejected code is never stored or tagged.
 
 **Parameters:**
 - `code` (required): The referral code to set
-- `appUserId` (optional): User ID, if available
+- `appUserId` (optional): User ID. Defaults to the one stored by `identifyUser()`; free-access codes need one (the backend answers `MISSING_USER_ID` without it)
 
 **Returns:** `Promise<SetCodeResult>` — `{ success, code?, message, campaign?, freeAccess?, grantsAccess?, entitlement?, expiresAt? }`
 
@@ -230,7 +230,7 @@ Validate and apply a code in one step. Validates first; applies only if valid.
 
 **Parameters:**
 - `code` (required): The referral code to validate and apply
-- `appUserId` (optional): User ID, if available
+- `appUserId` (optional): User ID. Defaults to the one stored by `identifyUser()`
 
 **Returns:** `Promise<CodeValidationResult & { applied?: boolean }>`
 

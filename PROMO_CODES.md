@@ -549,10 +549,10 @@ const result = await InfluTo.setReferralCode('FITGURU30', userId);
 ```
 
 **What it does:**
-1. Stores code locally (AsyncStorage)
-2. Sets in RevenueCat attributes automatically
-3. Records attribution with backend
-4. Future webhooks will attribute to this code
+1. Records attribution with backend (`appUserId` defaults to the user stored by `identifyUser()`)
+2. Only if the backend accepts the code (`success: true`): stores it locally (AsyncStorage)
+   and sets it in RevenueCat attributes automatically — a rejected code is never stored
+3. Future webhooks will attribute to this code
 
 **Returns:** `Promise<SetCodeResult>`
 

@@ -109,8 +109,8 @@ function normalize(raw: any): NormalizedPurchase | null {
   if (platform === 'ios' && !jws) return null;
   if (platform === 'android' && !token) return null;
 
-  // Best-effort price (some libs put it on the purchase; otherwise undefined → backend reserves
-  // $0 for an auto-captured one-time, logged. Use manual reportPurchase for precise pricing).
+  // Best-effort price (some libs put it on the purchase). Usually absent on Play purchases —
+  // reportOne() then looks the one-time product's price up via the IAP lib before reporting.
   const price: number | undefined =
     typeof raw.price === 'number'
       ? raw.price
@@ -128,6 +128,91 @@ function normalize(raw: any): NormalizedPurchase | null {
     jws,
     token,
   };
+}
+
+/** How long to wait for the IAP lib's product query before reporting without a price. */
+const PRODUCT_LOOKUP_TIMEOUT_MS = 5000;
+
+/** Resolve `p`, or reject after `ms` — a hung store query must never block reporting. */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('timeout')), ms);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
+/**
+ * Price + currency of a one-time product from the IAP lib's product record. Handles both
+ * shapes: the Play Billing offer in micros (`oneTimePurchaseOfferDetailsAndroid` on
+ * expo-iap 2.x / react-native-iap 14, `oneTimePurchaseOfferDetails` on react-native-iap
+ * ≤13) and the unified numeric `price` + `currency` (expo-iap ≥2.7, react-native-iap ≥14).
+ * Requires a currency — a bare amount is never reported. Returns null if neither is usable.
+ */
+function priceFromProduct(p: any): { price: number; currency: string } | null {
+  if (!p) return null;
+  const rawOffer = p.oneTimePurchaseOfferDetailsAndroid ?? p.oneTimePurchaseOfferDetails;
+  const offer = Array.isArray(rawOffer) ? rawOffer[0] : rawOffer;
+  if (offer && offer.priceAmountMicros != null) {
+    const micros = Number(offer.priceAmountMicros);
+    const currency = offer.priceCurrencyCode ?? p.currency;
+    if (Number.isFinite(micros) && micros >= 0 && typeof currency === 'string' && currency) {
+      return { price: micros / 1_000_000, currency };
+    }
+  }
+  const price =
+    typeof p.price === 'number'
+      ? p.price
+      : typeof p.price === 'string' && p.price.trim() !== ''
+        ? Number(p.price)
+        : NaN;
+  if (Number.isFinite(price) && price >= 0 && typeof p.currency === 'string' && p.currency) {
+    return { price, currency: p.currency };
+  }
+  return null;
+}
+
+/**
+ * Look up an Android one-time product's price via the host's IAP lib, because a Play
+ * purchase carries no price (without it the backend records the one-time sale at $0).
+ * Uses whichever query the installed version exposes: `fetchProducts({skus})` (expo-iap
+ * ≥2.7, react-native-iap ≥14), `requestProducts({skus})` (expo-iap 2.x), else
+ * `getProducts` (expo-iap takes a plain array, react-native-iap ≤13 takes `{skus}`).
+ * `type` is omitted on purpose: every version defaults to in-app products.
+ * Never throws — null on any failure / timeout.
+ */
+async function lookupProductPrice(
+  backend: IapBackend,
+  sku: string,
+): Promise<{ price: number; currency: string } | null> {
+  const mod = backend.mod;
+  try {
+    let query: unknown;
+    if (typeof mod.fetchProducts === 'function') {
+      query = mod.fetchProducts({ skus: [sku] });
+    } else if (typeof mod.requestProducts === 'function') {
+      query = mod.requestProducts({ skus: [sku] });
+    } else if (typeof mod.getProducts === 'function') {
+      query =
+        backend.name === 'expo-iap' ? mod.getProducts([sku]) : mod.getProducts({ skus: [sku] });
+    } else {
+      return null;
+    }
+    const products = await withTimeout(Promise.resolve(query), PRODUCT_LOOKUP_TIMEOUT_MS);
+    if (!Array.isArray(products)) return null;
+    const product = products.find((p: any) => p && (p.id === sku || p.productId === sku));
+    return priceFromProduct(product);
+  } catch {
+    return null;
+  }
 }
 
 /** Load the persisted dedup set. Fail-soft → empty set. */
@@ -164,6 +249,8 @@ export class AutoPurchaseCapture {
   private enabled = false;
   /** Host-declared one-time / consumable product ids (the purchase carries no type). */
   private oneTimeProductIds = new Set<string>();
+  /** Per-session cache of looked-up one-time prices (sku → price + currency). */
+  private priceCache = new Map<string, { price: number; currency: string }>();
 
   constructor(
     private readonly report: ReportFn,
@@ -295,16 +382,39 @@ export class AutoPurchaseCapture {
     // sends productId (routes to one-time validation) + best-effort price; subscriptions don't.
     const oneTime =
       n.platform === 'android' && !!n.productId && this.oneTimeProductIds.has(n.productId);
+    let price = oneTime ? n.price : undefined;
+    let currency = oneTime ? n.currency : undefined;
+    if (oneTime && (price === undefined || !currency)) {
+      // The purchase carried no (complete) price — ask the IAP lib for the product's price.
+      const looked = await this.lookupPrice(n.productId as string);
+      if (looked) {
+        price = looked.price;
+        currency = looked.currency;
+      } else {
+        this.log(`no price found for one-time product ${n.productId}; reporting without it`);
+      }
+    }
     await this.report({
       platform: n.platform,
       signedTransaction: n.jws,
       purchaseToken: n.token,
       productId: oneTime ? n.productId : undefined,
-      price: oneTime ? n.price : undefined,
-      currency: oneTime ? n.currency : undefined,
+      price,
+      currency,
     });
     reported.add(n.dedupId);
     await saveReported(reported);
     return true;
+  }
+
+  /** Cached `lookupProductPrice` against the active (or resolvable) IAP lib. Never throws. */
+  private async lookupPrice(sku: string): Promise<{ price: number; currency: string } | null> {
+    const cached = this.priceCache.get(sku);
+    if (cached) return cached;
+    const backend = this.backend ?? resolveBackend();
+    if (!backend) return null;
+    const looked = await lookupProductPrice(backend, sku);
+    if (looked) this.priceCache.set(sku, looked);
+    return looked;
   }
 }
