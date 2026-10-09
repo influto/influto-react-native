@@ -24,9 +24,10 @@ jobs:
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
-      # Trusted publishing needs npm >= 11.5.1; Node 20 ships an older npm.
+      # Trusted publishing needs npm >= 11.5.1; Node 20 ships an older npm. Pinned to 11:
+      # npm@latest (12+) refuses to install on Node 20.
       - name: Upgrade npm (OIDC trusted publishing support)
-        run: npm install -g npm@latest
+        run: npm install -g npm@11
       - run: npm install --legacy-peer-deps
       - run: npm run build
       - name: Publish (OIDC trusted publishing + provenance)
